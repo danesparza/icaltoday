@@ -79,19 +79,21 @@ func (s CalService) GetTodaysEvents(ctx context.Context, url, timezone string) (
 		if diff.Hours() > 23 && strings.Contains(url, "calendar.google.com") {
 
 			log.WithFields(log.Fields{
-				"url":         url,
-				"summary":     e.Summary,
-				"description": e.Description,
-				"starttime":   e.Start.UTC(),
-				"endtime":     e.End.UTC(),
-			}).Info("Google all-day event detected.  Using the UTC start/end times")
+				"url":                 url,
+				"summary":             e.Summary,
+				"description":         e.Description,
+				"starttime":           e.Start.UTC(),
+				"endtime":             e.End.UTC(),
+				"rewritten-starttime": RewriteToLocal(e.Start.UTC(), loc),
+				"rewritten-endtime":   RewriteToLocal(e.End.UTC(), loc),
+			}).Info("Google all-day event detected.  Using the UTC start/end times and rewriting them as local")
 
 			calEvent := CalendarEvent{
 				UID:         e.Uid,
 				Summary:     e.Summary,
 				Description: e.Description,
-				StartTime:   e.Start.UTC(),
-				EndTime:     e.End.UTC(),
+				StartTime:   RewriteToLocal(e.Start.UTC(), loc), // Rewrite the UTC time to appear as local time
+				EndTime:     RewriteToLocal(e.End.UTC(), loc),   // Rewrite the UTC time to appear as local time
 			}
 
 			retval.Events = append(retval.Events, calEvent)
@@ -124,4 +126,9 @@ func BeginningOfDay(t time.Time) time.Time {
 
 func EndOfDay(t time.Time) time.Time {
 	return BeginningOfDay(t).AddDate(0, 0, 1).Add(-time.Second)
+}
+
+// RewriteToLocal - rewrites a given time to use the passed location data
+func RewriteToLocal(t time.Time, loc *time.Location) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
 }
