@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -28,17 +29,27 @@ func (s CalService) GetTodaysEvents(ctx context.Context, url, timezone string) (
 	retval.TimeZone = timezone
 
 	//	Set our start / end times
-	if err := SetTimezone(timezone); err != nil {
-		log.WithError(err).Error("Error setting timezone - most likely timezone data not loaded in host OS")
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"timezone": timezone,
+		}).WithError(err).Error("Error setting location from the timezone - most likely timezone data not loaded in host OS")
 	}
 
-	t := GetTime(time.Now())
-	start := BeginningOfDay(t)
-	end := EndOfDay(t)
-	retval.CurrentLocalTime = GetTime(time.Now())
+	//	Current time in the location
+	t := time.Now().In(location)
+
+	//	Find the beginning and end of the day in the given timezone
+	start := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, location)
+	end := time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, location)
+
+	retval.CurrentLocalTime = t
 	log.WithFields(log.Fields{
-		"start": start,
-		"end":   end,
+		"currentLocalTime": t,
+		"start":            start,
+		"end":              end,
+		"timezone":         timezone,
+		"url":              url,
 	}).Info("Time debugging")
 
 	//	First, get the ical calendar at the url given
@@ -61,18 +72,15 @@ func (s CalService) GetTodaysEvents(ctx context.Context, url, timezone string) (
 	defer calendarDataResponse.Body.Close()
 
 	//	Create a parser and use our start/end times
-	c := gocal.NewParser(calendarDataResponse.Body)
-	c.Start, c.End = &start, &end
-	err = c.Parse()
+	calEvents, err := GetEventsForDay(calendarDataResponse.Body, start, end)
 	if err != nil {
-		log.WithError(err).Error("Problem parsing calendar file")
-		return retval, fmt.Errorf("problem parsing calendar file: %v", err)
+		return retval, err
 	}
 
 	//	Google calendar is so fucking weird.
 	//	Regular events (even if they recur) are returned as UTC start/end times.  They can be converted to local time easily.  This is good.
 	//	All-day events are going to be returned without a timezone.  A parser will assume a time of midnight IN THE UTC TIMEZONE.  This will lead to bullshit weirdness.
-	for _, e := range c.Events {
+	for _, e := range calEvents {
 		diff := e.End.Sub(*e.Start)
 
 		//	If it looks like it's an all-day event, and the url includes 'calendar.google.com', then don't use the timezone
@@ -84,16 +92,16 @@ func (s CalService) GetTodaysEvents(ctx context.Context, url, timezone string) (
 				"description":         e.Description,
 				"starttime":           e.Start.UTC(),
 				"endtime":             e.End.UTC(),
-				"rewritten-starttime": RewriteToLocal(e.Start.UTC(), loc),
-				"rewritten-endtime":   RewriteToLocal(e.End.UTC(), loc),
+				"rewritten-starttime": RewriteToLocal(e.Start.UTC(), location),
+				"rewritten-endtime":   RewriteToLocal(e.End.UTC(), location),
 			}).Info("Google all-day event detected.  Using the UTC start/end times and rewriting them as local")
 
 			calEvent := CalendarEvent{
 				UID:         e.Uid,
 				Summary:     e.Summary,
 				Description: e.Description,
-				StartTime:   RewriteToLocal(e.Start.UTC(), loc), // Rewrite the UTC time to appear as local time
-				EndTime:     RewriteToLocal(e.End.UTC(), loc),   // Rewrite the UTC time to appear as local time
+				StartTime:   RewriteToLocal(e.Start.UTC(), location), // Rewrite the UTC time to appear as local time
+				EndTime:     RewriteToLocal(e.End.UTC(), location),   // Rewrite the UTC time to appear as local time
 			}
 
 			retval.Events = append(retval.Events, calEvent)
@@ -102,8 +110,8 @@ func (s CalService) GetTodaysEvents(ctx context.Context, url, timezone string) (
 				UID:         e.Uid,
 				Summary:     e.Summary,
 				Description: e.Description,
-				StartTime:   GetTime(*e.Start),
-				EndTime:     GetTime(*e.End),
+				StartTime:   e.Start.In(location),
+				EndTime:     e.End.In(location),
 			}
 
 			retval.Events = append(retval.Events, calEvent)
@@ -120,15 +128,24 @@ func (s CalService) GetTodaysEvents(ctx context.Context, url, timezone string) (
 	return retval, nil
 }
 
-func BeginningOfDay(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-}
-
-func EndOfDay(t time.Time) time.Time {
-	return BeginningOfDay(t).AddDate(0, 0, 1).Add(-time.Second)
-}
-
 // RewriteToLocal - rewrites a given time to use the passed location data
 func RewriteToLocal(t time.Time, loc *time.Location) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
+}
+
+// GetEventsForDay gets events for the day given the calendar body and start/end times
+func GetEventsForDay(calendarBody io.Reader, start, end time.Time) ([]gocal.Event, error) {
+
+	//	Our return value:
+	retval := []gocal.Event{}
+
+	//	Create a parser and use our start/end times
+	c := gocal.NewParser(calendarBody)
+	c.Start, c.End = &start, &end
+	err := c.Parse()
+	if err != nil {
+		return retval, fmt.Errorf("problem parsing calendar file: %v", err)
+	}
+
+	return c.Events, nil
 }
