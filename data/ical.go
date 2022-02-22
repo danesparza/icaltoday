@@ -72,7 +72,7 @@ func (s CalService) GetTodaysEvents(ctx context.Context, url, timezone string) (
 	defer calendarDataResponse.Body.Close()
 
 	//	Create a parser and use our start/end times
-	calEvents, err := GetEventsForDay(calendarDataResponse.Body, start, end)
+	calEvents, err := GetEventsForDay(calendarDataResponse.Body, start, end, location)
 	if err != nil {
 		return retval, err
 	}
@@ -134,7 +134,7 @@ func RewriteToLocal(t time.Time, loc *time.Location) time.Time {
 }
 
 // GetEventsForDay gets events for the day given the calendar body and start/end times
-func GetEventsForDay(calendarBody io.Reader, start, end time.Time) ([]gocal.Event, error) {
+func GetEventsForDay(calendarBody io.Reader, start, end time.Time, location *time.Location) ([]gocal.Event, error) {
 
 	//	Our return value:
 	retval := []gocal.Event{}
@@ -142,6 +142,8 @@ func GetEventsForDay(calendarBody io.Reader, start, end time.Time) ([]gocal.Even
 	//	Create a parser and use our start/end times
 	c := gocal.NewParser(calendarBody)
 	c.Start, c.End = &start, &end
+	c.AllDayEventsTZ = location // Also give it a location
+
 	err := c.Parse()
 	if err != nil {
 		return retval, fmt.Errorf("problem parsing calendar file: %v", err)

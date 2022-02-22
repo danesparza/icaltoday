@@ -154,7 +154,7 @@ END:VCALENDAR
 	endTime := time.Date(2022, 2, 20, 23, 59, 59, 0, location)
 
 	//	Act
-	events, err := data.GetEventsForDay(strings.NewReader(testRRuleCalendar), startTime, endTime)
+	events, err := data.GetEventsForDay(strings.NewReader(testRRuleCalendar), startTime, endTime, location)
 	if err != nil {
 		t.Errorf("Error getting events for day: %v", err)
 	}
