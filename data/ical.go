@@ -149,3 +149,7 @@ func GetEventsForDay(calendarBody io.Reader, start, end time.Time) ([]gocal.Even
 
 	return c.Events, nil
 }
+
+func init() {
+	log.SetLevel(log.DebugLevel)
+}
