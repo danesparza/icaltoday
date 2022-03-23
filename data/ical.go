@@ -77,10 +77,22 @@ func (s CalService) GetTodaysEvents(ctx context.Context, url, timezone string) (
 		return retval, err
 	}
 
+	//	Track our event IDs
+	eventIDs := make(map[string]struct{})
+
 	//	Google calendar is so fucking weird.
 	//	Regular events (even if they recur) are returned as UTC start/end times.  They can be converted to local time easily.  This is good.
 	//	All-day events are going to be returned without a timezone.  A parser will assume a time of midnight IN THE UTC TIMEZONE.  This will lead to bullshit weirdness.
 	for _, e := range calEvents {
+
+		//	If we have duplicate event ids (and we shouldn't ... but I've seen this in the wild) discard anything after the first instance
+		//	See https://stackoverflow.com/a/10486196/19020 for more info on using an empty struct in a map to track this
+		if _, containsEvent := eventIDs[e.Uid]; containsEvent {
+			continue
+		} else {
+			eventIDs[e.Uid] = struct{}{}
+		}
+
 		diff := e.End.Sub(*e.Start)
 
 		//	If it looks like it's an all-day event, and the url includes 'calendar.google.com', then don't use the timezone

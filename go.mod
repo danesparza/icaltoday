@@ -27,4 +27,4 @@ require (
 	google.golang.org/protobuf v1.27.1 // indirect
 )
 
-replace github.com/apognu/gocal => github.com/danesparza/gocal v0.9.2
+replace github.com/apognu/gocal => github.com/danesparza/gocal v0.9.3
