@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/aws/aws-xray-sdk-go/xray"
 	"github.com/danesparza/icaltoday/data"
+	"github.com/newrelic/go-agent/v3/integrations/nrlambda"
+	"github.com/newrelic/go-agent/v3/newrelic"
 )
 
 var (
@@ -27,27 +27,32 @@ type Message struct {
 
 // HandleRequest handles the AWS lambda request
 func HandleRequest(ctx context.Context, msg Message) (data.CalendarResponse, error) {
-	xray.Configure(xray.Config{LogLevel: "trace"})
-	ctx, seg := xray.BeginSegment(ctx, "icaltoday-lambda-handler")
+
+	txn := newrelic.FromContext(ctx)
+	defer txn.StartSegment("icaltoday HandleRequest").End()
 
 	service := data.CalService{}
 	response, err := service.GetTodaysEvents(ctx, msg.CalendarURL, msg.Timezone)
 	if err != nil {
-		seg.Close(err)
 		log.Fatalf("problem getting calendar events: %v", err)
 	}
 
 	//	Set the service version information:
 	response.Version = fmt.Sprintf("%s.%s", BuildVersion, CommitID)
 
-	//	Close the segment
-	seg.Close(nil)
-
 	//	Return our response
 	return response, nil
 }
 
 func main() {
-	//	Immediately forward to Lambda
-	lambda.Start(HandleRequest)
+	// Pass nrlambda.ConfigOption() into newrelic.NewApplication to set
+	// Lambda specific configuration settings including
+	// Config.ServerlessMode.Enabled.
+	app, err := newrelic.NewApplication(nrlambda.ConfigOption())
+	if nil != err {
+		fmt.Println("error creating app (invalid config):", err)
+	}
+	// nrlambda.Start should be used in place of lambda.Start.
+	// nrlambda.StartHandler should be used in place of lambda.StartHandler.
+	nrlambda.Start(HandleRequest, app)
 }

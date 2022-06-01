@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/apognu/gocal"
+	"github.com/newrelic/go-agent/v3/newrelic"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/aws/aws-xray-sdk-go/xray"
 	"golang.org/x/net/context/ctxhttp"
 )
 
@@ -20,8 +20,9 @@ type CalService struct{}
 
 // GetTodaysEvents gets today's events from the given ical calendar url and the timezone.
 func (s CalService) GetTodaysEvents(ctx context.Context, url, timezone string) (CalendarResponse, error) {
-	//	Start the service segment
-	ctx, seg := xray.BeginSubsegment(ctx, "ical-service")
+
+	txn := newrelic.FromContext(ctx)
+	defer txn.StartSegment("CalService GetTodaysEvents").End()
 
 	//	Our return value
 	retval := CalendarResponse{}
@@ -55,18 +56,20 @@ func (s CalService) GetTodaysEvents(ctx context.Context, url, timezone string) (
 	//	First, get the ical calendar at the url given
 	clientRequest, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		seg.AddError(err)
+		txn.NoticeError(err)
 		return retval, fmt.Errorf("problem creating request to the ical url given: %v", err)
 	}
 
 	//	Set our headers
 	clientRequest.Header.Set("Content-Type", "application/geo+json; charset=UTF-8")
+	clientRequest = newrelic.RequestWithTransactionContext(clientRequest, txn)
 
 	//	Execute the request
 	client := &http.Client{}
-	calendarDataResponse, err := ctxhttp.Do(ctx, xray.Client(client), clientRequest)
+	client.Transport = newrelic.NewRoundTripper(client.Transport)
+	calendarDataResponse, err := ctxhttp.Do(ctx, client, clientRequest)
 	if err != nil {
-		seg.AddError(err)
+		txn.NoticeError(err)
 		return retval, fmt.Errorf("error when sending request to get the calendar data from the url: %v", err)
 	}
 	defer calendarDataResponse.Body.Close()
@@ -129,12 +132,6 @@ func (s CalService) GetTodaysEvents(ctx context.Context, url, timezone string) (
 			retval.Events = append(retval.Events, calEvent)
 		}
 	}
-
-	//	Add the report to the request metadata
-	xray.AddMetadata(ctx, "CalendarResult", retval)
-
-	// Close the segment
-	seg.Close(nil)
 
 	//	Return the report
 	return retval, nil
